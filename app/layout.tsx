@@ -5,7 +5,7 @@ import "./note-overrides.css";
 
 export const metadata: Metadata = {
   title: "簿言 Bóyán｜让复杂表格说得清楚",
-  description: "工作簿体检与交接助手",
+  description: "工作簿检测与交接助手",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

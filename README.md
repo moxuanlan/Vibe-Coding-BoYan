@@ -1,6 +1,6 @@
 # 簿言 Bóyán
 
-自建 Next.js + PostgreSQL 的工作簿体检与交接助手。当前已实现真实注册、登录、会话保护和静态产品页面；文件上传与 InfiniSynapse 分析将在下一阶段接入。
+自建 Next.js + PostgreSQL 的工作簿检测与交接助手。当前已实现真实注册、登录、会话保护和静态产品页面；文件上传与 InfiniSynapse 分析将在下一阶段接入。
 
 ## 本地启动
 

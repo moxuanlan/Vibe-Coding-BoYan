@@ -10,7 +10,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   if (await getCurrentUser()) redirect("/workspace");
   const params = await searchParams;
   return (
-    <AuthShell eyebrow="Welcome back" title="登录簿言" description="继续查看你的工作簿体检与交接报告。">
+    <AuthShell eyebrow="Welcome back" title="登录簿言" description="继续查看你的工作簿检测与交接报告。">
       <AuthForm mode="login" action={loginAction} registered={params.registered === "1"} />
     </AuthShell>
   );

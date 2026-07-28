@@ -21,32 +21,12 @@ export function OfficeShell({ email, logoutAction, active, children }: ShellProp
   </div>;
 }
 
-type DashboardData = { empty?: boolean; message?: string; taskId?: string; workbookName?: string; sheets?: string[]; selectedSheet?: string; rowCount?: number; headers?: string[]; primaryMetric?: string | null; metrics?: { label: string; value: number }[]; trend?: { label: string; value: number }[]; categories?: { label: string; value: number }[] };
+type DashboardData = { empty?: boolean; message?: string; taskId?: string; workbookName?: string; sheets?: string[]; selectedSheet?: string; rowCount?: number; headers?: string[]; structures?: { header: string; type: string; valid: number; missing: number }[]; overview?: string[]; isScoreSheet?: boolean; primaryMetric?: string | null; metricMode?: string; metrics?: { label: string; value: number }[]; trend?: { label: string; value: number }[]; trendTitle?: string; categoryTitle?: string; categories?: { label: string; value: number }[] };
 
 export function DashboardPreview() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [health, setHealth] = useState("—");
-  const [riskCount, setRiskCount] = useState(0);
   async function loadDashboard(sheet?: string) { const response = await fetch(`/api/dashboard${sheet ? `?sheet=${encodeURIComponent(sheet)}` : ""}`); if (response.ok) setDashboard(await response.json()); }
-  useEffect(() => { void loadDashboard(); void (async () => {
-    const historyResponse = await fetch("/api/analysis");
-    if (!historyResponse.ok) return;
-    const history = await historyResponse.json();
-    const latest = (history.tasks ?? []).find((item: { status: string }) => item.status === "completed");
-    if (!latest) return;
-    const taskResponse = await fetch(`/api/analysis/${latest.id}`);
-    if (!taskResponse.ok) return;
-    const task = (await taskResponse.json()).task;
-    const reportPath = findReportPath(task.workspace);
-    if (!reportPath) return;
-    const previewResponse = await fetch(`/api/analysis/${latest.id}/preview?path=${encodeURIComponent(reportPath)}`);
-    if (!previewResponse.ok) return;
-    const preview = await previewResponse.json();
-    const report = String(preview?.data?.content ?? preview?.data?.text ?? preview?.data ?? "");
-    setHealth(report.match(/总分[^\d]{0,30}(\d{1,3})/)?.[1] ?? report.match(/健康度[^\d]{0,20}(\d{1,3})/)?.[1] ?? "—");
-    const count = [...report.matchAll(/F-\d{3}/g)].map(match => match[0]);
-    setRiskCount(new Set(count).size);
-  })(); }, []);
+  useEffect(() => { void loadDashboard(); }, []);
   const trend = dashboard?.trend ?? [];
   const categories = dashboard?.categories ?? [];
   const trendMax = Math.max(...trend.map(item => item.value), 1);
@@ -57,23 +37,16 @@ export function DashboardPreview() {
       <div className="dashboard-tools">{dashboard?.sheets?.length ? <label>工作表<select value={dashboard.selectedSheet} onChange={e => void loadDashboard(e.target.value)}>{dashboard.sheets.map(item => <option key={item}>{item}</option>)}</select></label> : null}<Link className="secondary" href="/workspace">返回工作簿分析</Link></div>
     </div>
     {dashboard?.empty ? <div className="dashboard-empty"><strong>暂无可视化数据</strong><p>{dashboard.message}</p><Link href="/workspace" className="primary">上传工作簿 →</Link></div> : <>
-    <div className="metric-grid"><Metric label="工作簿健康度" value={health} suffix="/ 100" note="来自分析报告" warning />{(dashboard?.metrics ?? []).slice(0,3).map(metric => <Metric key={metric.label} label={metric.label} value={metric.value.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} note={`来自 ${dashboard?.selectedSheet}`} />)}</div>
+    <div className="metric-grid"><Metric label={dashboard?.isScoreSheet ? "学生人数" : "数据行数"} value={String(dashboard?.rowCount ?? 0)} suffix={dashboard?.isScoreSheet ? " 人" : " 行"} note={`来自 ${dashboard?.selectedSheet}`} />{(dashboard?.metrics ?? []).slice(0,3).map(metric => <Metric key={metric.label} label={metric.label} value={metric.value.toLocaleString("zh-CN", { maximumFractionDigits: 2 })} note={dashboard?.metricMode ?? "统计值"} />)}</div>
     <div className="dashboard-grid">
-      <article className="viz-card revenue-card"><CardHead kicker="Data trend" title={trend.length ? `${dashboard?.primaryMetric ?? "数值"}趋势` : "未识别到日期趋势"} legend={dashboard?.selectedSheet ?? ""}/>{trend.length ? <div className="dynamic-columns">{trend.slice(-20).map(item => <div key={item.label}><i style={{height:`${Math.max(4,item.value/trendMax*100)}%`}}/><span>{item.label.slice(5)}</span><b>{item.value.toLocaleString("zh-CN",{maximumFractionDigits:1})}</b></div>)}</div> : <p className="viz-empty">当前工作表没有同时满足条件的日期列与数值列。</p>}</article>
-      <article className="viz-card risk-chart-card"><CardHead kicker="Analysis result" title="分析概览" legend="真实报告"/><div className="report-facts"><strong>{health}</strong><span>健康度 / 100</span><strong>{riskCount || "—"}</strong><span>已识别风险</span></div></article>
-      <article className="viz-card category-card"><CardHead kicker="Category view" title={categories.length ? `${dashboard?.primaryMetric ?? "数值"}分类分布` : "未识别到分类分布"} legend={dashboard?.selectedSheet ?? ""}/>{categories.length ? <div className="bar-list">{categories.map(item => <div key={item.label}><span>{item.label}</span><div><i style={{width:`${Math.max(2,item.value/categoryMax*100)}%`}}/></div><b>{item.value.toLocaleString("zh-CN",{maximumFractionDigits:1})}</b></div>)}</div> : <p className="viz-empty">当前工作表没有适合分组的文本字段与数值字段。</p>}</article>
-      <article className="viz-card findings-card"><CardHead kicker="Workbook structure" title="数据结构" legend={`${dashboard?.rowCount ?? 0} 行`}/><div className="structure-list">{(dashboard?.headers ?? []).slice(0,12).map((header,index)=><span key={`${header}-${index}`}>{header}</span>)}</div></article>
+      <article className="viz-card revenue-card"><CardHead kicker="Data distribution" title={dashboard?.trendTitle ?? "数据分布"} legend={dashboard?.selectedSheet ?? ""}/>{trend.length ? <div className="dynamic-columns">{trend.slice(-20).map(item => <div key={item.label}><i style={{height:`${Math.max(4,item.value/trendMax*100)}%`}}/><span>{item.label}</span><b>{item.value.toLocaleString("zh-CN",{maximumFractionDigits:1})}</b></div>)}</div> : <p className="viz-empty">当前工作表没有可生成的趋势或分布数据。</p>}</article>
+      <article className="viz-card risk-chart-card"><CardHead kicker="Key findings" title="关键结论" legend="自动统计"/><ul className="overview-list">{(dashboard?.overview ?? []).map(item => <li key={item}>{item}</li>)}</ul></article>
+      <article className="viz-card category-card"><CardHead kicker="Category view" title={categories.length ? dashboard?.categoryTitle ?? "分类统计" : "未识别到分类统计"} legend={dashboard?.selectedSheet ?? ""}/>{categories.length ? <div className="bar-list">{categories.map(item => <div key={item.label}><span>{item.label}</span><div><i style={{width:`${Math.max(2,item.value/categoryMax*100)}%`}}/></div><b>{item.value.toLocaleString("zh-CN",{maximumFractionDigits:1})}</b></div>)}</div> : <p className="viz-empty">当前工作表没有适合分组的分类字段。</p>}</article>
+      <article className="viz-card findings-card"><CardHead kicker="Workbook structure" title="字段与完整性" legend={`${dashboard?.rowCount ?? 0} 行`}/><div className="structure-table"><div><b>字段</b><b>类型</b><b>有效</b><b>缺失</b></div>{(dashboard?.structures ?? []).slice(0,12).map((column,index)=><div key={`${column.header}-${index}`}><span>{column.header}</span><span>{column.type}</span><span>{column.valid}</span><span className={column.missing ? "has-missing" : ""}>{column.missing}</span></div>)}</div></article>
     </div>
     <p className="dashboard-footnote">所有指标均来自工作簿与分析报告；推断性结论需人工复核。</p>
     </>}
   </section>;
-}
-
-function findReportPath(value: unknown): string | null {
-  if (typeof value === "string" && value.endsWith("boyan-workbook-report.md")) return value;
-  if (Array.isArray(value)) for (const item of value) { const found = findReportPath(item); if (found) return found; }
-  if (value && typeof value === "object") for (const item of Object.values(value as Record<string, unknown>)) { const found = findReportPath(item); if (found) return found; }
-  return null;
 }
 
 function Metric({ label, value, suffix, note, warning = false }: { label: string; value: string; suffix?: string; note: string; warning?: boolean }) { return <article className={`metric-card ${warning ? "warning" : ""}`}><span>{label}</span><strong>{value}<small>{suffix}</small></strong><p>{note}</p></article>; }
@@ -127,7 +100,7 @@ export function NotesPreview() {
     downloadText(`${active.title || "无标题笔记"}.md`, `# ${active.title || "无标题笔记"}\n\n> ${active.tag} · ${active.date}\n\n${active.body}${fileSection}\n`, "text/markdown;charset=utf-8");
   }
   return <section className="notebook-view">
-    <div className="notebook-sidebar"><div className="notebook-title"><div><span>Personal notes</span><h1>记事本</h1></div><div className="notebook-actions"><button className="note-download" onClick={downloadNote} disabled={!active}>下载当前笔记</button><button onClick={addNote} aria-label="新建笔记" title="新建笔记">＋</button></div></div><label className="note-search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索笔记"/></label><div className="note-filters"><button className="active">全部笔记 <span>{notes.length}</span></button><button>关联报告 <span>{notes.filter(n=>n.tag==="关联报告").length}</span></button></div><div className="note-list">{filtered.map(note => <div className={selected === note.id ? "active" : ""} key={note.id}><button className="note-select" onClick={() => setSelected(note.id)}><small>{note.tag}</small><b>{note.title}</b><p>{note.body}</p><time>{note.date}</time></button><button className="note-delete" onClick={() => setPendingDelete(note)} aria-label={`删除${note.title || "无标题笔记"}`} title="删除笔记">🗑</button></div>)}</div></div>
+    <div className="notebook-sidebar"><div className="notebook-title"><div><span>Personal notes</span><h1>记事本</h1></div><div className="notebook-actions"><button className="note-download" onClick={downloadNote} disabled={!active}>下载当前笔记</button><button onClick={addNote} aria-label="新建笔记" title="新建笔记">＋</button></div></div><label className="note-search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索笔记"/></label><div className="note-filters"><button className="active">全部笔记 <span>{notes.length}</span></button><button>关联报告 <span>{notes.filter(n=>n.tag==="关联报告").length}</span></button></div><div className="note-list">{filtered.map(note => <div className={selected === note.id ? "active" : ""} key={note.id}><button className="note-select" onClick={() => setSelected(note.id)}><small>{note.tag}</small><b>{note.title}</b><p>{note.body}</p><time>{note.date}</time></button><button className="note-delete" onClick={() => setPendingDelete(note)} aria-label={`删除${note.title || "无标题笔记"}`} title="删除笔记"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></div>)}</div></div>
     <div className="note-paper">{active ? <><div className="paper-tools"><span>{active.tag} · {active.date}自动保存</span></div><input className="note-heading-input" value={active.title} onChange={e => update("title", e.target.value)} aria-label="笔记标题"/><textarea className="note-body-input" value={active.body} onChange={e => update("body", e.target.value)} placeholder="在这里记录新的想法……" aria-label="笔记正文"/><div className="note-attachments"><label className="attachment-add">＋ 添加相关文件<input type="file" accept=".xlsx,.xls,.pdf,.docx,.doc,.txt,.md,.csv" onChange={event => { void addAttachment(event.target.files?.[0]); event.target.value = ""; }}/></label><small>支持 Excel、PDF、Word、TXT、MD、CSV，单文件不超过 10MB</small>{attachmentError && <p className="attachment-error">{attachmentError}</p>}{attachments.length > 0 && <div className="attachment-list">{attachments.map(file => <div key={file.id}><span><b>{file.file_name}</b><small>{(file.file_size / 1024).toFixed(1)} KB</small></span><a href={`/api/notes/${active.id}/attachments/${file.id}`}>下载</a><button onClick={() => void removeAttachment(file.id)}>移除</button></div>)}</div>}</div></> : <div className="empty-note">新建一则笔记，留住今天的思路。</div>}</div>
     {pendingDelete && <div className="delete-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !deleting) setPendingDelete(null); }}><div className="delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-description"><span>Delete note</span><h2 id="delete-dialog-title">是否确认删除？</h2><p id="delete-dialog-description">笔记“{pendingDelete.title || "无标题笔记"}”删除后无法恢复。</p><div><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deleting}>取消</button><button className="confirm-delete" onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "正在删除…" : "确认删除"}</button></div></div></div>}
   </section>;
