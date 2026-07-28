@@ -9,7 +9,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!task) return NextResponse.json({ error: "任务不存在" }, { status: 404 });
   const path = new URL(request.url).searchParams.get("path");
   if (!path || path.includes("..")) return NextResponse.json({ error: "文件路径无效" }, { status: 400 });
-  const response = await infiniFetch("/api/ai_task/previewFile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId: task.infini_task_id, fileName: path }) });
-  const payload = await response.json();
-  return NextResponse.json(payload);
+  try {
+    const response = await infiniFetch("/api/ai_task/previewFile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId: task.infini_task_id, fileName: path }), signal: AbortSignal.timeout(8000) });
+    const payload = await response.json();
+    return NextResponse.json(payload);
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return NextResponse.json({ error: timedOut ? "报告预览响应超时" : "报告预览暂时不可用" }, { status: timedOut ? 504 : 502 });
+  }
 }

@@ -18,7 +18,14 @@ export type AnalysisTask = {
 };
 
 export async function findOwnedTask(id: string, userId: string) {
-  const result = await db.query<AnalysisTask>("SELECT * FROM analysis_tasks WHERE id = $1 AND user_id = $2 LIMIT 1", [id, userId]);
+  const result = await db.query<AnalysisTask>(
+    `SELECT id, user_id, infini_task_id, conn_id, status, workbook_name, context_name,
+            latest_message, error_message, workspace, created_at, updated_at
+       FROM analysis_tasks
+      WHERE id = $1 AND user_id = $2
+      LIMIT 1`,
+    [id, userId],
+  );
   return result.rows[0] ?? null;
 }
 

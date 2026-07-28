@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "home" | "upload" | "progress" | "report";
 type TaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -16,6 +16,8 @@ export function WorkspacePreview({ email, logoutAction }: { email: string; logou
   const [report, setReport] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const reportCache = useRef(new Map<string, string>());
+  const selectedTaskId = useRef<string | null>(null);
 
   const go = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const files = useMemo(() => collectFiles(task?.workspace), [task?.workspace]);
@@ -44,24 +46,46 @@ export function WorkspacePreview({ email, logoutAction }: { email: string; logou
   }, []);
 
   async function refreshTask(id: string) {
+    selectedTaskId.current = id;
     const response = await fetch(`/api/analysis/${id}`);
     if (!response.ok) return null;
     const current = (await response.json()).task as Task;
+    if (selectedTaskId.current !== id) return current;
     setTask(current);
-    setProgressText(current.latestMessage || current.errorMessage || statusLabel(current.status));
+    setProgressText(readableMessage(current.latestMessage) || readableMessage(current.errorMessage) || statusLabel(current.status));
     if (current.status === "completed") {
-      const reportPath = collectFiles(current.workspace).find(path => path.endsWith("boyan-workbook-report.md"));
-      if (reportPath) {
-        const previewResponse = await fetch(`/api/analysis/${id}/preview?path=${encodeURIComponent(reportPath)}`);
-        if (previewResponse.ok) {
-          const preview = await previewResponse.json();
-          const content = preview?.data?.content ?? preview?.data?.text ?? preview?.data ?? preview?.content;
-          setReport(typeof content === "string" ? content : current.latestMessage ?? "分析已完成。");
-        } else setReport(current.latestMessage ?? "分析已完成。");
-      } else setReport(current.latestMessage ?? "分析已完成，请从产物列表下载完整报告。");
+      const fallback = readableMessage(current.latestMessage) || "正在加载……";
+      setReport(reportCache.current.get(id) ?? fallback);
       setView("report");
+      const reportPath = collectFiles(current.workspace).find(path => path.endsWith("boyan-workbook-report.md"));
+      if (reportPath && !reportCache.current.has(id)) void loadReport(id, reportPath);
     } else setView("progress");
     return current;
+  }
+
+  function openHistoryTask(item: HistoryTask) {
+    selectedTaskId.current = item.id;
+    const cachedReport = reportCache.current.get(item.id);
+    const summary = readableMessage(item.latest_message);
+    setTask({ id: item.id, status: item.status, workbookName: item.workbook_name, latestMessage: item.latest_message, errorMessage: item.error_message, workspace: [] });
+    setProgressText(summary || readableMessage(item.error_message) || statusLabel(item.status));
+    if (item.status === "completed") {
+      setReport((cachedReport ?? summary) || "正在加载……");
+      go("report");
+    } else go("progress");
+    void refreshTask(item.id);
+  }
+
+  async function loadReport(id: string, reportPath: string) {
+    try {
+      const previewResponse = await fetch(`/api/analysis/${id}/preview?path=${encodeURIComponent(reportPath)}`);
+      if (!previewResponse.ok) return;
+      const preview = await previewResponse.json();
+      const content = preview?.data?.content ?? preview?.data?.text ?? preview?.data ?? preview?.content;
+      if (typeof content !== "string" || !content.trim()) return;
+      reportCache.current.set(id, content);
+      if (selectedTaskId.current === id) setReport(content);
+    } catch { /* The database summary remains visible when the remote preview is unavailable. */ }
   }
 
   async function pollTask(id: string, isStopped: () => boolean = () => false) {
@@ -157,7 +181,7 @@ export function WorkspacePreview({ email, logoutAction }: { email: string; logou
       </header>
       <main>
         {view === "home" && <Home onUpload={() => go("upload")} onReport={() => task ? go("report") : go("upload")} />}
-        {view === "upload" && <UploadPage onSubmit={startAnalysis} submitting={submitting} error={formError} history={history} onOpen={refreshTask} onDelete={deleteHistoryTask} />}
+        {view === "upload" && <UploadPage onSubmit={startAnalysis} submitting={submitting} error={formError} history={history} onOpen={openHistoryTask} onDelete={deleteHistoryTask} />}
         {view === "progress" && <ProgressPage task={task} text={progressText} onCancel={cancelTask} />}
         {view === "report" && <ReportPage task={task} report={report} files={files} onFollowUp={followUp} onUpload={() => go("upload")} />}
       </main>
@@ -169,11 +193,11 @@ function Home({ onUpload, onReport }: { onUpload: () => void; onReport: () => vo
   return <section className="view"><div className="hero"><div className="hero-copy"><span className="eyebrow">Excel workbook intelligence</span><h1>让每一份复杂表格，<br/><em>都说得清楚。</em></h1><p className="lead">上传 Excel，自动理解工作簿结构、发现公式与数据风险，并生成下一位同事真正看得懂的交接说明书。</p><div className="hero-actions"><button className="primary" onClick={onUpload}>开始工作簿检测 <span className="arrow">→</span></button><button className="secondary" onClick={onReport}>查看最近报告</button></div><div className="privacy-note"><span>✓</span> 原文件不会被自动修改 · 所有发现均建议人工复核</div></div><HeroArt/></div><FeatureBand/></section>;
 }
 
-function UploadPage({ onSubmit, submitting, error, history, onOpen, onDelete }: { onSubmit: (e: FormEvent<HTMLFormElement>) => void; submitting: boolean; error: string; history: HistoryTask[]; onOpen: (id: string) => void; onDelete: (id: string) => Promise<boolean> }) {
+function UploadPage({ onSubmit, submitting, error, history, onOpen, onDelete }: { onSubmit: (e: FormEvent<HTMLFormElement>) => void; submitting: boolean; error: string; history: HistoryTask[]; onOpen: (item: HistoryTask) => void; onDelete: (id: string) => Promise<boolean> }) {
   const [pendingDelete, setPendingDelete] = useState<HistoryTask | null>(null);
   const [deleting, setDeleting] = useState(false);
   async function confirmDelete() { if (!pendingDelete) return; setDeleting(true); if (await onDelete(pendingDelete.id)) setPendingDelete(null); setDeleting(false); }
-  return <><Page eyebrow="Workbook intake" title={<>把难懂的工作簿，<br/>交给我们先读一遍。</>} description="支持一个 .xlsx 工作簿，并可追加一份业务说明文档。"><div className="workspace"><form className="panel" onSubmit={onSubmit}><span className="panel-label">01 · 上传工作簿</span>{error && <div className="error-message">{error}</div>}<label className="dropzone"><div><div className="file-icon"/><h3>选择 Excel 工作簿</h3><p>仅支持 .xlsx，单文件不超过 25MB</p><input className="real-file-input" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required/></div></label><label className="context-field"><span>业务说明（可选）</span><input name="context" type="file" accept=".pdf,.docx,.txt,.md"/><small>支持 PDF、DOCX、TXT、MD</small></label><button className="primary sample" disabled={submitting}>{submitting ? "正在上传…" : "开始检测 →"}</button></form><aside className="panel"><span className="panel-label">最近任务</span><div className="history-list">{history.length ? history.map(item=><div className="history-row" key={item.id}><button className="history-open" onClick={() => void onOpen(item.id)}><span>{item.workbook_name}</span><small className={`status-${item.status}`}>{statusLabel(item.status)}</small></button><button className="history-delete" onClick={() => setPendingDelete(item)} disabled={item.status === "queued" || item.status === "running"} aria-label={`删除${item.workbook_name}`} title={item.status === "queued" || item.status === "running" ? "请先取消进行中的任务" : "删除任务记录"}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></div>) : <p className="hint">还没有分析记录。</p>}</div><a className="secondary sample download-sample" href="/sample/月度销售利润表示例.xlsx" download>下载示例工作簿</a></aside></div></Page>{pendingDelete && <div className="delete-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !deleting) setPendingDelete(null); }}><div className="delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="task-delete-title"><span>Delete record</span><h2 id="task-delete-title">是否确认删除？</h2><p>任务“{pendingDelete.workbook_name}”的本地分析记录将被删除，此操作无法恢复。</p><div><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deleting}>取消</button><button className="confirm-delete" onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "正在删除…" : "确认删除"}</button></div></div></div>}</>;
+  return <><Page eyebrow="Workbook intake" title={<>把难懂的工作簿，<br/>交给我们先读一遍。</>} description="支持一个 .xlsx 工作簿，并可追加一份业务说明文档。"><div className="workspace"><form className="panel" onSubmit={onSubmit}><span className="panel-label">01 · 上传工作簿</span>{error && <div className="error-message">{error}</div>}<label className="dropzone"><div><div className="file-icon"/><h3>选择 Excel 工作簿</h3><p>仅支持 .xlsx，单文件不超过 25MB</p><input className="real-file-input" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required/></div></label><label className="context-field"><span>业务说明（可选）</span><input name="context" type="file" accept=".pdf,.docx,.txt,.md"/><small>支持 PDF、DOCX、TXT、MD</small></label><button className="primary sample" disabled={submitting}>{submitting ? "正在上传…" : "开始检测 →"}</button></form><aside className="panel"><span className="panel-label">最近任务</span><div className="history-list">{history.length ? history.map(item=><div className="history-row" key={item.id}><button className="history-open" onClick={() => onOpen(item)}><span>{item.workbook_name}</span><small className={`status-${item.status}`}>{statusLabel(item.status)}</small></button><button className="history-delete" onClick={() => setPendingDelete(item)} disabled={item.status === "queued" || item.status === "running"} aria-label={`删除${item.workbook_name}`} title={item.status === "queued" || item.status === "running" ? "请先取消进行中的任务" : "删除任务记录"}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></div>) : <p className="hint">还没有分析记录。</p>}</div><a className="secondary sample download-sample" href="/sample/月度销售利润表示例.xlsx" download>下载示例工作簿</a></aside></div></Page>{pendingDelete && <div className="delete-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !deleting) setPendingDelete(null); }}><div className="delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="task-delete-title"><span>Delete record</span><h2 id="task-delete-title">是否确认删除？</h2><p>任务“{pendingDelete.workbook_name}”的本地分析记录将被删除，此操作无法恢复。</p><div><button className="secondary" onClick={() => setPendingDelete(null)} disabled={deleting}>取消</button><button className="confirm-delete" onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "正在删除…" : "确认删除"}</button></div></div></div>}</>;
 }
 
 function ProgressPage({ task, text, onCancel }: { task: Task | null; text: string; onCancel: () => void }) {
@@ -204,6 +228,10 @@ function SimpleReport({ content }: { content: string }) {
 function Page({ eyebrow, title, description, children }: { eyebrow: string; title: React.ReactNode; description: string; children: React.ReactNode }) { return <section className="view page"><div className="page-intro"><div><span className="eyebrow">{eyebrow}</span><h2 className="page-title">{title}</h2></div><p>{description}</p></div>{children}</section>; }
 function Step({ label, done=false, current=false }: { label:string; done?:boolean; current?:boolean }) { return <div className={`step ${current?"current":""}`}><span className="step-mark">{done?"✓":"·"}</span><span>{label}</span><small>{done?"完成":current?"进行中":"等待"}</small></div>; }
 function statusLabel(status: TaskStatus) { return ({ queued:"等待中", running:"分析中", completed:"已完成", failed:"失败", cancelled:"已取消" })[status]; }
+function readableMessage(value: string | null | undefined) {
+  const message = value?.trim();
+  return message && !/^(null|undefined)$/i.test(message) ? message : "";
+}
 
 function collectFiles(value: unknown): string[] {
   const paths = new Set<string>();
