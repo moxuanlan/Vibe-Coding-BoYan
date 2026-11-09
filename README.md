@@ -2,6 +2,10 @@
 
 自建 Next.js + PostgreSQL 的工作簿检测与交接助手。当前已实现真实注册、登录、会话保护和静态产品页面；文件上传与 InfiniSynapse 分析将在下一阶段接入。
 
+## 在线访问
+
+访问地址：[簿言 Bóyán 登录页](https://vibe-coding-boyan.vercel.app/login)
+
 ## 本地启动
 
 1. 复制 `.env.example` 为 `.env.local`，填写 PostgreSQL 连接地址。
